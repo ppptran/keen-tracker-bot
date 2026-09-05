@@ -127,7 +127,7 @@ Bot cần đúng **3 file** nằm cùng thư mục (ví dụ `/opt/keenetic-bot`
 
 | File | Lấy từ |
 |---|---|
-| `keen-tracker-bot-linux-arm64` | binary đã build (repo) |
+| `keen-tracker-bot-linux-arm64` | binary đã build (Release) |
 | `.env` | từ `.env.example` |
 | `devices.json` | từ `devices.json.example` |
 
