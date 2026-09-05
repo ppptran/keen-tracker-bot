@@ -1,0 +1,10 @@
+[
+  {
+    "mac": "00:00:00:00:00:00",
+    "name": "Mesh Controller"
+  },
+  {
+    "mac": "00:00:00:00:00:00",
+    "name": "Mesh Extender Tầng 2"
+  }
+]

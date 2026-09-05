@@ -1,0 +1,10 @@
+# Config thật (giữ lại .env.example / devices.json.example)
+.env
+devices.json
+
+# Binary đã build (amd64 cho máy tính, arm64 cho router)
+keen-tracker-bot-linux-*
+
+# Tài liệu nội bộ
+/docs/
+zzcli.md

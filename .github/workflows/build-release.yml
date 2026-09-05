@@ -1,0 +1,58 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Version Tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      release_title:
+        description: 'Release Title (e.g. Release v1.0.0)'
+        required: true
+        default: 'Release v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Build Binaries
+        run: |
+          # CGO_ENABLED=0: binary static, không phụ thuộc libc —
+          # bắt buộc để chạy được trên Entware của router (aarch64)
+          # Linux amd64 (PC / server)
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o keen-tracker-bot-linux-amd64 .
+
+          # Linux arm64 (Keenetic KN-3811 và router ARM 64-bit khác)
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o keen-tracker-bot-linux-arm64 .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          name: ${{ inputs.release_title }}
+          draft: false
+          prerelease: false
+          files: |
+            keen-tracker-bot-linux-amd64
+            keen-tracker-bot-linux-arm64
+            .env.example
+            devices.json.example
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
