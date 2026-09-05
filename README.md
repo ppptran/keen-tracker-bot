@@ -8,6 +8,40 @@ Bot Telegram giám sát hệ thống **Mesh Wi-Fi của router Keenetic** (khả
 
 Ngoài lệnh, bot tự cảnh báo khi thiết bị trong `devices.json` online/offline và khi mất kết nối với controller.
 
+## Giao diện trên Telegram
+
+Khi bot khởi chạy:
+
+```
+✅ Keenetic Tracker Bot đã khởi chạy thành công!
+
+📊 Giám sát: 7 thiết bị
+⏱ Chu kỳ quét: 1m
+🧭 Lệnh: /status · /clients · /refresh
+```
+
+Khi gõ `/status` — bản đồ mesh dựng đúng kiểu trang *Mesh Wi-Fi System* của Web UI (node offline vẫn hiển thị, `↑` chỉ node cha khi mesh nhiều tầng):
+
+```
+🎛 Controller · KN-3811 · OS 5.0.12
+   Uptime 5d 05:06 · 🟢 Online · 👥 24 clients
+├─ Agent-2  🟢 192.168.1.227
+│      👥 4 · 1000 Mbit/s · 5d 04:53
+├─ Agent-3  🟢 192.168.1.231
+│      👥 0 · 1000 Mbit/s · 5d 04:32
+├─ Agent-4  🟢 192.168.1.233
+│      👥 1 · 1000 Mbit/s · 5d 03:49
+├─ Agent-5  🟢 192.168.1.236
+│      👥 1 · 1000 Mbit/s · 5d 03:53
+├─ Agent-6  🟢 192.168.1.237
+│      👥 0 · 1000 Mbit/s · 5d 03:36
+└─ Agent-7 🔴 Offline
+       (không tham gia mesh)
+
+📊 Controller 1 · Extenders 6 · Clients 25
+🕒 Cập nhật lúc: 16:43:49 05/09/2026
+```
+
 > ⚠️ **Kiến trúc CPU:** router KN-3811 là **aarch64 (ARM 64-bit)** — file chạy trên router phải là `keen-tracker-bot-linux-arm64` (đã build sẵn trong repo). Bản `-amd64` chỉ dùng cho máy tính x86.
 
 ---
@@ -258,3 +292,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o keen-tracker-bot-linux-arm64 .
 # cho máy tính x86-64 (chạy thử/debug)
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o keen-tracker-bot-linux-amd64 .
 ```
+
+## License / Giấy phép
+
+Phát hành theo **GNU General Public License v3.0** — xem toàn bộ nội dung trong file [LICENSE](LICENSE).
+
+- **EN:** This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3. Anyone may use, install, study, modify and share it — including for commercial purposes — as long as redistributed modified versions remain GPL-3.0 licensed. Copyright (c) 2026 detran.
+- **VI:** Đây là phần mềm tự do: bất kỳ ai cũng có thể tải, cài, sử dụng, nghiên cứu, sửa đổi và chia sẻ lại — kể cả cho mục đích thương mại (bán phần mềm, bán dịch vụ cài đặt) — với điều kiện bản phái sinh khi phân phối phải tiếp tục phát hành theo GPL-3.0 (mở nguồn). Bản dịch tiếng Việt không chính thức của GPL xem tại [gnu.org/licenses/gpl-3.0.vi.html](https://www.gnu.org/licenses/gpl-3.0.vi.html).
