@@ -524,6 +524,63 @@ func (c *Client) doGet(path string) ([]byte, error) {
 	return body, nil
 }
 
+// doPostRCI performs an authenticated POST /rci/ batch request and returns the
+// raw body, with the same 401-retry-once resilience as doGet.
+func (c *Client) doPostRCI(payload string) ([]byte, error) {
+	body, status, err := c.doPostRaw(payload)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusUnauthorized {
+		// Session expired -> re-auth and retry once.
+		if ok, authErr := c.Authenticate(); authErr == nil && ok {
+			body, status, err = c.doPostRaw(payload)
+			if err != nil {
+				return nil, err
+			}
+			if status == http.StatusUnauthorized {
+				return nil, fmt.Errorf("re-authenticated but POST /rci/ still returns 401")
+			}
+		} else {
+			return nil, fmt.Errorf("POST /rci/ returned 401 and re-auth failed: %w", authErr)
+		}
+	}
+	return body, nil
+}
+
+// doPostRaw performs a single authenticated POST /rci/ without re-auth handling.
+func (c *Client) doPostRaw(payload string) ([]byte, int, error) {
+	// Ensure we have a session cookie. If not, authenticate first.
+	c.mu.Lock()
+	needAuth := !c.authenticated
+	c.mu.Unlock()
+	if needAuth {
+		if ok, err := c.Authenticate(); err != nil || !ok {
+			return nil, 0, fmt.Errorf("not authenticated: %w", err)
+		}
+	}
+
+	req, err := http.NewRequest("POST", c.BaseURL+"/rci/", strings.NewReader(payload))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", headerContentType)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return body, resp.StatusCode, nil
+}
+
 // doGetRaw performs a single authenticated GET without re-auth handling.
 func (c *Client) doGetRaw(path string) ([]byte, int, error) {
 	// Ensure we have a session cookie. If not, authenticate first.
@@ -739,10 +796,19 @@ func (c *Client) GetControllerNode() (MeshNode, error) {
 	return node, nil
 }
 
-// GetHotspotHosts queries GET /rci/show/ip/hotspot: every wired and wireless
-// client of the whole mesh. Wireless entries carry the nested "mws" object
-// that links a client to its mesh node (mws.cid).
+// GetHotspotHosts reads the whole-mesh client table exactly the way the web UI
+// does: a batch POST with details=wireless. Only that variant reports the
+// top-level ap/rssi/txrate fields of clients attached directly to the
+// controller's own radios — they carry no mws object at all, and the plain GET
+// omits these fields entirely, which made the bot count them as wired. Falls
+// back to the plain GET when the batch endpoint is unavailable (mesh-agent
+// clients stay correct; controller-attached wireless hosts degrade to wired).
 func (c *Client) GetHotspotHosts() ([]HotspotHost, error) {
+	if body, err := c.doPostRCI(`[{"show":{"ip":{"hotspot":{"details":"wireless"}}}}]`); err == nil {
+		if hosts, perr := parseHotspotBatch(body); perr == nil {
+			return hosts, nil
+		}
+	}
 	body, err := c.doGet("/rci/show/ip/hotspot")
 	if err != nil {
 		return nil, err
@@ -851,7 +917,11 @@ func (c *Client) GetWiFIMesh() (WiFIMesh, error) {
 		}
 	}
 
-	ctrlNode.ClientCount = len(groups[ctrlNode.CID])
+	// The web UI algorithm groups every wired host of the mesh under the
+	// controller cid (wired hosts carry no mws.cid), which would show ~240 on
+	// the controller. The map instead reports only the wireless clients that
+	// attach directly to the controller's own radios.
+	ctrlNode.ClientCount = CountWirelessClients(groups[ctrlNode.CID])
 	nodes := make([]MeshNode, 0, len(m.Members)+1)
 	nodes = append(nodes, ctrlNode)
 	for _, mm := range m.Members {

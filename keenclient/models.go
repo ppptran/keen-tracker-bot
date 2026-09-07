@@ -173,7 +173,23 @@ type WiFIMesh struct {
 	FetchedAt    time.Time               `json:"fetched_at"`
 }
 
-// TotalClients sums the per-node client counts (the web UI "Clients" counter).
+// CountWirelessClients returns how many clients in a group are wireless.
+// GroupClientsByNode puts every wired host of the mesh (they carry no mws.cid)
+// into the controller bucket, so the controller must count only the IsWireless
+// entries to report clients that attach to its own radios.
+func CountWirelessClients(clients []ClientInfo) int {
+	n := 0
+	for _, c := range clients {
+		if c.IsWireless {
+			n++
+		}
+	}
+	return n
+}
+
+// TotalClients sums the per-node client counts. Every node count is
+// wireless-only (the controller reports only directly attached wireless
+// clients), so this is the mesh-wide wireless total.
 func (m WiFIMesh) TotalClients() int {
 	n := 0
 	for _, node := range m.Nodes {
@@ -206,10 +222,12 @@ type MeshNode struct {
 	IsUpdateAvailable bool         `json:"is_update_available,omitempty"`
 }
 
-// HotspotHost is one entry of GET /rci/show/ip/hotspot. Wireless clients carry
-// a nested "mws" object whose "cid" points at the mesh node they attach to;
-// wired hosts have no "mws" at all. "mws-backhaul" marks node-to-node Wi-Fi
-// links, which the web UI excludes from client counts.
+// HotspotHost is one entry of the ip/hotspot client table. Wireless clients
+// carry a nested "mws" object whose "cid" points at the mesh node they attach
+// to; clients attached directly to the controller's own radios have no "mws"
+// but carry top-level ap/ssid/rssi/txrate fields (only reported when the table
+// is read with details=wireless); wired hosts have neither. "mws-backhaul"
+// marks node-to-node Wi-Fi links, which the web UI excludes from client counts.
 type HotspotHost struct {
 	MAC         string `json:"mac"`
 	IP          string `json:"ip"`
@@ -220,7 +238,13 @@ type HotspotHost struct {
 	Registered  bool   `json:"registered"`
 	LastSeen    int64  `json:"last-seen"`
 	MWSBackhaul bool   `json:"mws-backhaul"`
-	Interface   struct {
+	// Top-level Wi-Fi association fields (details=wireless responses only).
+	AP     string `json:"ap,omitempty"`
+	Mode   string `json:"mode,omitempty"`
+	SSID   string `json:"ssid,omitempty"`
+	RSSI   int    `json:"rssi,omitempty"`
+	TxRate int    `json:"txrate,omitempty"`
+	Interface struct {
 		ID string `json:"id"`
 	} `json:"interface"`
 	MWS *HotspotMWS `json:"mws,omitempty"`
@@ -309,6 +333,41 @@ func parseMeshStatus(data []byte) (MeshStatus, error) {
 		return st, fmt.Errorf("parse mws/status failed: %w", err)
 	}
 	return st, nil
+}
+
+// IsWireless reports whether the host entry describes a wireless association.
+// Mesh-agent clients carry the nested mws object; clients attached directly to
+// the controller's own radios have no mws and expose ap/rssi/txrate at the top
+// level instead (only reported by the details=wireless table). RSSI is negative
+// dBm, so 0 means "absent".
+func (h HotspotHost) IsWireless() bool {
+	return h.MWS != nil || h.AP != "" || h.SSID != "" || h.RSSI != 0 || h.TxRate != 0
+}
+
+// parseHotspotBatch parses the batch POST /rci/ reply for the hotspot request:
+// [{"show":{"ip":{"hotspot":{"host":[...]}}}}] (verified on KN-3811 /
+// KeeneticOS 5.0.12). Tolerates empty bodies.
+func parseHotspotBatch(data []byte) ([]HotspotHost, error) {
+	tr := strings.TrimSpace(string(data))
+	if tr == "" || tr == "null" || tr == "[]" || tr == "{}" {
+		return nil, nil
+	}
+	var batch []struct {
+		Show struct {
+			IP struct {
+				Hotspot struct {
+					Host []HotspotHost `json:"host"`
+				} `json:"hotspot"`
+			} `json:"ip"`
+		} `json:"show"`
+	}
+	if err := json.Unmarshal(data, &batch); err != nil {
+		return nil, fmt.Errorf("parse hotspot batch failed: %w", err)
+	}
+	if len(batch) == 0 {
+		return nil, nil
+	}
+	return batch[0].Show.IP.Hotspot.Host, nil
 }
 
 // parseHotspotHosts parses /rci/show/ip/hotspot: {"host": [...]} (verified on
@@ -573,14 +632,18 @@ func parseUptimeSeconds(s string) int64 {
 	return v
 }
 
-// GroupClientsByNode replicates the Keenetic web UI algorithm exactly:
+// GroupClientsByNode replicates the Keenetic web UI grouping:
 //   - keep hosts with active == true,
 //   - exclude the mesh node MACs themselves,
-//   - group by host.mws.cid, falling back to the controller cid (wired hosts
-//     and controller-attached clients have no mws object).
+//   - group by host.mws.cid; hosts without mws fall back to the controller cid.
 //
-// Note the web UI counts active wired hosts even when link == "down"; the
-// per-node counters intentionally match that behaviour.
+// Wireless detection goes one step further than the web UI tree: a client
+// attached directly to the controller's radios has no mws object, so it is
+// recognised via its top-level association fields (details=wireless table) and
+// still marked IsWireless — without that, the controller's wireless count
+// would always be 0. Wired hosts stay in the controller bucket as non-wireless.
+// The web UI counts active wired hosts even when link == "down"; the per-node
+// counters intentionally match that behaviour.
 func GroupClientsByNode(hosts []HotspotHost, controllerCID string, extenderMACs []string) map[string][]ClientInfo {
 	extSet := make(map[string]bool, len(extenderMACs))
 	for _, mac := range extenderMACs {
@@ -614,6 +677,14 @@ func GroupClientsByNode(hosts []HotspotHost, controllerCID string, extenderMACs 
 			ci.TxRate = h.MWS.TxRate
 			ci.WiFiMode = h.MWS.Mode
 			ci.Uptime = h.MWS.Uptime
+		} else if h.IsWireless() {
+			// Directly on the controller's radios: association details live at
+			// the top level of the host entry, not under mws.
+			ci.IsWireless = true
+			ci.NodeCID = controllerCID
+			ci.RSSI = h.RSSI
+			ci.TxRate = h.TxRate
+			ci.WiFiMode = h.Mode
 		}
 		if ci.Name == "" {
 			ci.Name = ci.MAC

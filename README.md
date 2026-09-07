@@ -24,7 +24,7 @@ Khi gõ `/status` — bản đồ mesh dựng đúng kiểu trang *Mesh Wi-Fi Sy
 
 ```
 🎛 Controller · KN-3811 · OS 5.0.12
-   Uptime 5d 05:06 · 🟢 Online · 👥 24 clients
+   Uptime 5d 05:06 · 🟢 Online · 👥 2 wireless trực tiếp
 ├─ Agent-2  🟢 192.168.1.227
 │      👥 4 · 1000 Mbit/s · 5d 04:53
 ├─ Agent-3  🟢 192.168.1.231
@@ -38,7 +38,7 @@ Khi gõ `/status` — bản đồ mesh dựng đúng kiểu trang *Mesh Wi-Fi Sy
 └─ Agent-7 🔴 Offline
        (không tham gia mesh)
 
-📊 Controller 1 · Extenders 6 · Clients 25
+📊 Controller 1 · Extenders 6 · Wireless 11 · Wired 241
 🕒 Cập nhật lúc: 16:43:49 05/09/2026
 ```
 
@@ -143,7 +143,7 @@ Rồi trên shell Entware của router:
 ```sh
 mkdir -p /opt/keenetic-bot && cd /opt/keenetic-bot
 
-# thay 192.168.22.XXX bằng IP máy tính của bạn
+# thay 192.168.1.XXX bằng IP máy tính của bạn
 wget http://192.168.1.XXX:8000/keen-tracker-bot-linux-arm64
 wget http://192.168.1.XXX:8000/.env.example -O .env
 wget http://192.168.1.XXX:8000/devices.json.example -O devices.json

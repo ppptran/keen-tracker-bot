@@ -490,7 +490,7 @@ func htmlEscape(s string) string {
 // mode untouched.
 func renderMeshMap(mesh keenclient.WiFIMesh) string {
 	var sb strings.Builder
-	sb.WriteString("<b>🗺 Mesh Wi-Fi System</b>\n")
+	sb.WriteString("<b>🗺 Keenetic Mesh Monitor</b>\n")
 	for i, node := range mesh.Nodes {
 		if node.IsController {
 			status := "🔴 Offline"
@@ -498,7 +498,7 @@ func renderMeshMap(mesh keenclient.WiFIMesh) string {
 				status = "🟢 Online"
 			}
 			sb.WriteString(fmt.Sprintf("🎛 <b>%s</b> · %s · OS %s\n", htmlEscape(node.Name), htmlEscape(shortModel(node.Model)), htmlEscape(node.Firmware)))
-			sb.WriteString(fmt.Sprintf("   Uptime %s · %s · 👥 %d clients\n", formatUptime(node.Uptime), status, node.ClientCount))
+			sb.WriteString(fmt.Sprintf("│      👥 %d · %s ·  %s\n", node.ClientCount, status, formatUptime(node.Uptime)))
 			continue
 		}
 		prefix := "├─"
@@ -523,7 +523,7 @@ func renderMeshMap(mesh keenclient.WiFIMesh) string {
 		} else {
 			sb.WriteString(fmt.Sprintf("%s <b>%s</b> 🔴 Offline\n", prefix, htmlEscape(node.Name)))
 			if node.Mode == "" {
-				sb.WriteString(detailPrefix + "(không tham gia mesh)\n")
+				sb.WriteString(detailPrefix + "\n")
 			}
 		}
 	}
@@ -537,7 +537,20 @@ func renderMeshMap(mesh keenclient.WiFIMesh) string {
 			sb.WriteString(fmt.Sprintf("• %s (<code>%s</code>)\n", htmlEscape(name), htmlEscape(c.MAC)))
 		}
 	}
-	sb.WriteString(fmt.Sprintf("\n📊 Controller 1 · Extenders %d · Clients %d\n", len(mesh.Nodes)-1, mesh.TotalClients()))
+	// Per-node counts in the tree are wireless-only, so the footer reports the
+	// wired hosts separately (they all live in the controller bucket of
+	// ClientGroups) to keep the mesh total visible.
+	wirelessTotal, wiredTotal := 0, 0
+	for _, group := range mesh.ClientGroups {
+		for _, c := range group {
+			if c.IsWireless {
+				wirelessTotal++
+			} else {
+				wiredTotal++
+			}
+		}
+	}
+	sb.WriteString(fmt.Sprintf("\n📊 Controller 1 · Extenders %d · Wireless %d · Wired %d\n", len(mesh.Nodes)-1, wirelessTotal, wiredTotal))
 	sb.WriteString(fmt.Sprintf("🕒 <i>Cập nhật lúc: %s</i>", formatTime(time.Now())))
 	return sb.String()
 }
@@ -590,8 +603,10 @@ func (t *Tracker) handleClientsCommand(chatID int64, arg string) {
 		return shown[i].IP < shown[j].IP
 	})
 
+	wirelessCount := keenclient.CountWirelessClients(clients)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📱 <b>%s</b> — tổng 👥 %d clients\n(×%d đang kết nối thực sự)\n\n", htmlEscape(node.Name), len(clients), len(shown)))
+	sb.WriteString(fmt.Sprintf("📱 <b>%s</b> — tổng 👥 %d clients (%d wireless · %d wired)\n(×%d đang kết nối thực sự)\n\n",
+		htmlEscape(node.Name), len(clients), wirelessCount, len(clients)-wirelessCount, len(shown)))
 	const maxShow = 30
 	if len(shown) == 0 {
 		sb.WriteString("Không có client nào đang kết nối thực sự.\n")
