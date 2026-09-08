@@ -1,30 +1,36 @@
 # Keen Tracker Bot
 
-Bot Telegram giám sát hệ thống **Mesh Wi-Fi của router Keenetic** (khảo sát và triển khai trên **Viettel NR3053 / Keenetic KN-3811**, KeeneticOS 5.x).
+<div align="center">
 
-- `/status` — quét mesh và gửi bản đồ dạng cây: Controller → các Agent (IP, số client, tốc độ backhaul, uptime, băng tần Wi-Fi), node offline vẫn hiển thị.
-- `/clients <tên node>` — liệt kê client đang kết nối thật sự vào một node (tên, IP, RSSI, tốc độ Wi-Fi).
-- `/refresh` — quét ngay và gửi lại bản đồ.
+**English** | [🇻🇳 Tiếng Việt](README_VN.md)
 
-Ngoài lệnh, bot tự cảnh báo khi thiết bị trong `devices.json` online/offline và khi mất kết nối với controller.
+</div>
 
-## Giao diện trên Telegram
+A Telegram bot that monitors a **Keenetic router's Mesh Wi-Fi system** (designed and deployed on **Viettel NR3053 / Keenetic KN-3811**, KeeneticOS 5.x).
 
-Khi bot khởi chạy:
+- `/status` — scans the mesh and sends a tree-style map: Controller → Agents (IP, client count, backhaul speed, uptime, Wi-Fi band); offline nodes are still shown.
+- `/clients <node name>` — lists the clients actually connected to a given node (name, IP, RSSI, Wi-Fi speed).
+- `/refresh` — runs a scan immediately and resends the map.
+
+Besides the commands, the bot automatically alerts you when devices listed in `devices.json` go online/offline and when the connection to the controller is lost.
+
+## Telegram Interface
+
+When the bot starts:
 
 ```
-✅ Keenetic Tracker Bot đã khởi chạy thành công!
+✅ Keenetic Tracker Bot started successfully!
 
-📊 Giám sát: 7 thiết bị
-⏱ Chu kỳ quét: 1m
-🧭 Lệnh: /status · /clients · /refresh
+📊 Monitoring: 7 devices
+⏱ Scan interval: 1m
+🧭 Commands: /status · /clients · /refresh
 ```
 
-Khi gõ `/status` — bản đồ mesh dựng đúng kiểu trang *Mesh Wi-Fi System* của Web UI (node offline vẫn hiển thị, `↑` chỉ node cha khi mesh nhiều tầng):
+Typing `/status` — the mesh map is laid out like the Web UI's *Mesh Wi-Fi System* page (offline nodes are still shown; `↑` marks the parent node in a multi-tier mesh):
 
 ```
 🎛 Controller · KN-3811 · OS 5.0.12
-   Uptime 5d 05:06 · 🟢 Online · 👥 2 wireless trực tiếp
+   Uptime 5d 05:06 · 🟢 Online · 👥 2 direct wireless clients
 ├─ Agent-2  🟢 192.168.1.227
 │      👥 4 · 1000 Mbit/s · 5d 04:53
 ├─ Agent-3  🟢 192.168.1.231
@@ -36,46 +42,46 @@ Khi gõ `/status` — bản đồ mesh dựng đúng kiểu trang *Mesh Wi-Fi Sy
 ├─ Agent-6  🟢 192.168.1.237
 │      👥 0 · 1000 Mbit/s · 5d 03:36
 └─ Agent-7 🔴 Offline
-       (không tham gia mesh)
+       (not joined to the mesh)
 
 📊 Controller 1 · Extenders 6 · Wireless 11 · Wired 241
-🕒 Cập nhật lúc: 16:43:49 05/09/2026
+🕒 Updated at: 16:43:49 05/09/2026
 ```
 
-> ⚠️ **Kiến trúc CPU:** router KN-3811 là **aarch64 (ARM 64-bit)** — file chạy trên router phải là `keen-tracker-bot-linux-arm64` (đã build sẵn trong repo). Bản `-amd64` chỉ dùng cho máy tính x86.
+> ⚠️ **CPU architecture:** the KN-3811 router is **aarch64 (ARM 64-bit)** — the binary that runs on the router must be `keen-tracker-bot-linux-arm64` (pre-built in this repo). The `-amd64` build is only for x86 computers.
 
 ---
 
-## 1. Chuẩn bị router: SSH + Entware (bắt buộc)
+## 1. Prepare the router: SSH + Entware (required)
 
-Bot chạy **ngay trên router**, nên router phải có Entware và bật SSH. Tất cả làm trên Web UI của router (`http://192.168.1.1`).
+The bot runs **directly on the router**, so the router needs Entware installed and SSH enabled. Everything is done in the router's Web UI (`http://192.168.1.1`).
 
-### 1a. Cài system components
+### 1a. Install system components
 
-Vào **Management → System Settings** → mục *KeeneticOS Update and Component Options* → **Show components**, đảm bảo đã cài 2 thành phần:
+Go to **Management → System Settings** → the *KeeneticOS Update and Component Options* section → **Show components**, and make sure these two components are installed:
 
 - **SSH server**
 - **OPKG package system**
 
-(Nếu thiếu, tick chọn → Apply, router sẽ tải về và cài — cần Internet.)
+(If they're missing, tick them → Apply; the router will download and install them — Internet required.)
 
-### 1b. Bật SSH cho user
+### 1b. Enable SSH for a user
 
-Vào **Management → Users and Access**:
+Go to **Management → Users and Access**:
 
-- **User Accounts**: có sẵn user `admin` (có mật khẩu). Có thể dùng luôn hoặc **Create user** riêng.
-- Kéo xuống mục **Administrative Services → Inbound Management Access**: tick **via SSH** (port mặc định 22).
+- **User Accounts**: an `admin` user (with a password) exists by default. You can use it as is or **Create user** separately.
+- Scroll down to **Administrative Services → Inbound Management Access**: tick **via SSH** (default port 22).
 
-### 1c. Cài Entware (bắt buộc — không có thì không thoát được `(config)>`)
+### 1c. Install Entware (required — without it you can't escape the `(config)>` CLI)
 
-Vào **Management → OPKG** (trang *OPKG Package Manager*):
+Go to **Management → OPKG** (the *OPKG Package Manager* page):
 
-1. **Drive**: chọn **Internal storage** → **Save** (KN-3811 có sẵn lựa chọn này; muốn dùng USB thì chọn ổ USB — nhớ cắm sẵn).
-2. **User Access**: tick user cần quyền (mặc định `admin` đã được tick).
+1. **Drive**: select **Internal storage** → **Save** (the KN-3811 offers this option out of the box; to use USB instead, select the USB drive — make sure it's plugged in).
+2. **User Access**: tick the user that needs access (`admin` is ticked by default).
 
-⚠️ Chọn Drive xong **chưa có Entware** — phải nạp installer `aarch64-installer.tar.gz` (router KN-3811 là aarch64) từ `bin.entware.net`. Có 2 cách:
+⚠️ Selecting the Drive does **not** install Entware yet — you must load the `aarch64-installer.tar.gz` installer (the KN-3811 is aarch64) from `bin.entware.net`. Two ways to do it:
 
-**Cách A — router tự tải (khuyên dùng):** SSH vào router, tại prompt `(config)>` chạy:
+**Option A — let the router download it (recommended):** SSH into the router and run at the `(config)>` prompt:
 
 ```
 (config)> opkg disk storage:/ https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz
@@ -83,67 +89,67 @@ Vào **Management → OPKG** (trang *OPKG Package Manager*):
 (config)> system reboot
 ```
 
-**Cách B — tải file về máy rồi upload (nếu router không tải được từ Internet):**
+**Option B — download the file to your computer and upload it (if the router can't download from the Internet):**
 
-1. Tải file: `https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz`
-2. Web UI → **Management → Applications** → mục *USB Devices* → **Internal storage** → tạo thư mục `install` → upload file vừa tải vào đó.
-3. SSH vào router: `(config)> opkg disk storage:/` → `system configuration save` → `system reboot`.
+1. Download the file: `https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz`
+2. Web UI → **Management → Applications** → the *USB Devices* section → **Internal storage** → create an `install` folder → upload the downloaded file there.
+3. SSH into the router: `(config)> opkg disk storage:/` → `system configuration save` → `system reboot`.
 
-Sau khi reboot, router giải nén installer và cài Entware (~1–2 phút, log hiện `"Entware" installed!`). Kiểm tra:
+After the reboot, the router unpacks the installer and installs Entware (~1–2 minutes; the log shows `"Entware" installed!`). To verify:
 
 ```
 (config)> exec sh
 ```
 
-→ nhảy vào **BusyBox shell** (`/ #`) là thành công — đây chính là chỗ thoát được `(config)>`.
+→ landing in the **BusyBox shell** (`/ #`) means success — this is exactly how you escape the `(config)>` CLI.
 
-> Tuỳ chọn bảo mật: trong shell gõ `passwd root` để đổi mật khẩu root của Entware (mặc định `root`/`keenetic`).
+> Optional security step: in the shell, run `passwd root` to change the Entware root password (default is `root`/`keenetic`).
 
-> Entware là môi trường Debian-like chạy bên trong KeeneticOS. Nhờ nó ta mới có shell thật trên router (`exec sh`) và thư mục `/opt` bền vững qua lần khởi động lại.
+> Entware is a Debian-like environment that runs inside KeeneticOS. Thanks to it you get a real shell on the router (`exec sh`) and a persistent `/opt` directory that survives reboots.
 
 ---
 
-## 2. SSH vào router và vào shell Entware
+## 2. SSH into the router and enter the Entware shell
 
-SSH vào router sẽ rơi vào **CLI của Keenetic** (không phải shell Linux — lệnh `uname`, `ls`… sẽ báo `no such command`). Cần Entware để vào shell:
+SSH-ing into the router drops you into the **Keenetic CLI** (not a Linux shell — commands like `uname`, `ls`, etc. return `no such command`). You need Entware to get to a shell:
 
 ```bash
-ssh admin@192.168.1.1        # nhập mật khẩu
+ssh admin@192.168.1.1        # enter your password
 ```
 
-Tại prompt `(config)>` của Keenetic CLI, gõ:
+At the Keenetic CLI `(config)>` prompt, type:
 
 ```
 exec sh
 ```
 
-→ vào **shell Entware** (BusyBox). Từ đây mọi lệnh Linux hoạt động. (`exit` để thoát ngược lại CLI.)
+→ you're in the **Entware shell** (BusyBox). From here, all Linux commands work. (`exit` goes back to the CLI.)
 
 ---
 
-## 3. Tạo thư mục `keenetic-bot` và copy đúng 3 file
+## 3. Create the `keenetic-bot` folder and copy exactly 3 files
 
-Bot cần đúng **3 file** nằm cùng thư mục (ví dụ `/opt/keenetic-bot`):
+The bot needs exactly **3 files** in the same folder (e.g. `/opt/keenetic-bot`):
 
-| File | Lấy từ |
+| File | Taken from |
 |---|---|
-| `keen-tracker-bot-linux-arm64` | binary đã build (Release) |
-| `.env` | từ `.env.example` |
-| `devices.json` | từ `devices.json.example` |
+| `keen-tracker-bot-linux-arm64` | pre-built binary (Release) |
+| `.env` | from `.env.example` |
+| `devices.json` | from `devices.json.example` |
 
-**Cách chuyển file đơn giản nhất — router kéo từ máy tính:** đứng ở thư mục repo trên máy tính, mở HTTP server tạm:
+**Simplest file transfer — the router pulls from your computer:** from the repo folder on your computer, start a temporary HTTP server:
 
 ```bash
 cd keen-tracker-bot
 python3 -m http.server 8000
 ```
 
-Rồi trên shell Entware của router:
+Then, in the router's Entware shell:
 
 ```sh
 mkdir -p /opt/keenetic-bot && cd /opt/keenetic-bot
 
-# thay 192.168.1.XXX bằng IP máy tính của bạn
+# replace 192.168.1.XXX with your computer's IP
 wget http://192.168.1.XXX:8000/keen-tracker-bot-linux-arm64
 wget http://192.168.1.XXX:8000/.env.example -O .env
 wget http://192.168.1.XXX:8000/devices.json.example -O devices.json
@@ -151,40 +157,43 @@ wget http://192.168.1.XXX:8000/devices.json.example -O devices.json
 chmod +x keen-tracker-bot-linux-arm64
 ```
 
-*(Cách khác: `opkg install openssh-sftp-server` rồi dùng WinSCP/scp kéo file qua.)*
+*(Alternative: `opkg install openssh-sftp-server`, then pull the files over with WinSCP/scp.)*
 
 ---
 
-## 4. Sửa `.env`
+## 4. Edit `.env`
 
 ```sh
-vi .env        # hoặc: opkg install nano && nano .env
+vi .env        # or: opkg install nano && nano .env
 ```
 
 ```ini
 # Telegram
-TELEGRAM_TOKEN=123456:ABC...      # token từ @BotFather
-TELEGRAM_CHAT_ID=........       # chat ID nhận cảnh báo
+TELEGRAM_TOKEN=123456:ABC...      # token from @BotFather
+TELEGRAM_CHAT_ID=........       # chat ID that receives alerts
 
-# Router — bot chạy ngay trên router nên dùng chính IP nó
+# Bot language: vi (Vietnamese) or en (English); default vi
+BOT_LANG=vi
+
+# Router — the bot runs on the router itself, so use its own IP
 KEENETIC_IP=192.168.1.1
 KEENETIC_USERNAME=admin
 KEENETIC_PASSWORD=...
 
 KEENETIC_INSECURE_SKIP_VERIFY=true
-CHECK_INTERVAL=1m                 # chu kỳ quét
+CHECK_INTERVAL=1m                 # scan interval
 
-# Số chu kỳ quét hỏng liên tiếp trước khi cảnh báo "mất kết nối controller"
+# Number of consecutive failed scans before the "controller connection lost" alert
 CONTROLLER_FAIL_THRESHOLD=3
 ```
 
-> Bot chạy trên chính router nên `KEENETIC_IP` có thể thử `127.0.0.1`; nếu không được thì dùng IP LAN (`192.168.1.1`).
+> Since the bot runs on the router itself, you can try `127.0.0.1` for `KEENETIC_IP`; if that doesn't work, use the LAN IP (`192.168.1.1`).
 
 ---
 
-## 5. Sửa `devices.json`
+## 5. Edit `devices.json`
 
-File này **chỉ dùng để cảnh báo** online/offline (danh sách MAC cần theo dõi) và đặt tên riêng. Tên node/controller hiển thị trên `/status` bot tự lấy từ router.
+This file is **only used for alerting** when devices go online/offline (the list of MAC addresses to watch) and for custom names. The node/controller names shown in `/status` are fetched from the router by the bot itself.
 
 ```json
 [
@@ -193,16 +202,16 @@ File này **chỉ dùng để cảnh báo** online/offline (danh sách MAC cần
 ]
 ```
 
-> **Lưu ý MAC của Controller:** phải là **MAC Bridge0** (MAC mesh, xem trên Web UI **My Networks and Wi-Fi → Home segment**, hoặc chính là phần MAC trong `backhaul.root/bridge`). Nó có thể khác 1 ký tự cuối với MAC trong trang nhận diện router. MAC sai → không cảnh báo được controller.
-> Node chưa có trong file vẫn hiện trên `/status`, nhưng sẽ **không có cảnh báo** online/offline.
+> **Note on the Controller's MAC:** it must be the **Bridge0 MAC** (the mesh MAC — see the Web UI under **My Networks and Wi-Fi → Home segment**, or the MAC portion of `backhaul.root/bridge`). It may differ from the MAC shown on the router's identification page in the last character. A wrong MAC → no controller alerts.
+> Nodes not listed in this file still appear in `/status`, but they get **no** online/offline **alerts**.
 
 ---
 
-## 6. Tự chạy mỗi lần router khởi động
+## 6. Run automatically on every router boot
 
-Entware **không dùng systemd** (không có `systemctl` trên router) — tương đương của nó là script init trong `/opt/etc/init.d/`, tự chạy lúc boot và vẫn có `start / stop / restart / status`.
+Entware does **not** use systemd (there's no `systemctl` on the router) — its equivalent is an init script in `/opt/etc/init.d/`, which runs automatically at boot and still supports `start / stop / restart / status`.
 
-Tạo file `/opt/etc/init.d/S99keenetic-bot`:
+Create the file `/opt/etc/init.d/S99keenetic-bot`:
 
 ```sh
 cat > /opt/etc/init.d/S99keenetic-bot << 'EOF'
@@ -217,7 +226,7 @@ start() {
         echo "keenetic-bot already running (pid $(cat "$PIDFILE"))"
         return 0
     fi
-    cd "$DIR" || return 1        # bot đọc .env/devices.json theo thư mục hiện tại
+    cd "$DIR" || return 1        # the bot reads .env/devices.json from the current directory
     nohup "$BIN" >> "$LOGFILE" 2>&1 &
     echo $! > "$PIDFILE"
     echo "keenetic-bot started (pid $(cat "$PIDFILE"))"
@@ -252,50 +261,50 @@ EOF
 chmod +x /opt/etc/init.d/S99keenetic-bot
 ```
 
-Script tên `S99*` sẽ được Entware **tự chạy khi router khởi động** (kể cả khi mất điện). Các lệnh điều khiển:
+A script named `S99*` is **run automatically by Entware when the router boots** (including after a power outage). Control commands:
 
 ```sh
-/opt/etc/init.d/S99keenetic-bot start      # chạy
-/opt/etc/init.d/S99keenetic-bot stop       # dừng
-/opt/etc/init.d/S99keenetic-bot restart    # chạy lại
-/opt/etc/init.d/S99keenetic-bot status     # xem trạng thái
-tail -f /opt/keenetic-bot/bot.log          # xem log
+/opt/etc/init.d/S99keenetic-bot start      # start
+/opt/etc/init.d/S99keenetic-bot stop       # stop
+/opt/etc/init.d/S99keenetic-bot restart    # restart
+/opt/etc/init.d/S99keenetic-bot status     # check status
+tail -f /opt/keenetic-bot/bot.log          # view logs
 ```
 
 ---
 
-## 7. Kiểm tra lần đầu
+## 7. First-run check
 
 ```sh
 /opt/etc/init.d/S99keenetic-bot start
 tail -f /opt/keenetic-bot/bot.log
 ```
 
-Thấy dòng boot (không có `❌`) và nhận được tin **"Keenetic Tracker Bot đã khởi chạy thành công!"** trên Telegram là xong. Thử `/status`, `/clients Agent-2`, `/refresh`.
+Once you see the boot lines (no `❌`) and receive the **"Keenetic Tracker Bot started successfully!"** message on Telegram, you're done. Try `/status`, `/clients Agent-2`, `/refresh`.
 
 ---
 
-## Cập nhật bot về sau
+## Updating the bot later
 
 ```sh
 /opt/etc/init.d/S99keenetic-bot stop
-# thay file binary mới vào /opt/keenetic-bot/ (wget/scp như bước 3)
+# drop the new binary into /opt/keenetic-bot/ (wget/scp as in step 3)
 /opt/etc/init.d/S99keenetic-bot start
 ```
 
-## Build từ nguồn (máy tính cần cài Go)
+## Build from source (requires Go on your computer)
 
 ```bash
-# cho router (aarch64) — file này dùng để deploy
+# for the router (aarch64) — this is the file to deploy
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o keen-tracker-bot-linux-arm64 .
 
-# cho máy tính x86-64 (chạy thử/debug)
+# for an x86-64 computer (testing/debugging)
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o keen-tracker-bot-linux-amd64 .
 ```
 
-## License / Giấy phép
+## License
 
-Phát hành theo **GNU General Public License v3.0** — xem toàn bộ nội dung trong file [LICENSE](LICENSE).
+Released under the **GNU General Public License v3.0** — see the full text in the [LICENSE](LICENSE) file.
 
 - **EN:** This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3. Anyone may use, install, study, modify and share it — including for commercial purposes — as long as redistributed modified versions remain GPL-3.0 licensed. Copyright (c) 2026 detran.
-- **VI:** Đây là phần mềm tự do: bất kỳ ai cũng có thể tải, cài, sử dụng, nghiên cứu, sửa đổi và chia sẻ lại — kể cả cho mục đích thương mại (bán phần mềm, bán dịch vụ cài đặt) — với điều kiện bản phái sinh khi phân phối phải tiếp tục phát hành theo GPL-3.0 (mở nguồn). Bản dịch tiếng Việt không chính thức của GPL xem tại [gnu.org/licenses/gpl-3.0.vi.html](https://www.gnu.org/licenses/gpl-3.0.vi.html).
+- An unofficial Vietnamese translation of the GPL is available at [gnu.org/licenses/gpl-3.0.vi.html](https://www.gnu.org/licenses/gpl-3.0.vi.html).

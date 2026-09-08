@@ -49,6 +49,7 @@ type Tracker struct {
 	bot            *tgbotapi.BotAPI
 	keenClient     *keenclient.Client
 	interval       time.Duration
+	lang           string
 
 	// Controller reachability tracking (P0-5): alert once after
 	// failThreshold consecutive failed scans, and once on recovery.
@@ -64,9 +65,9 @@ func normalizeMAC(mac string) string {
 	return strings.TrimSpace(mac)
 }
 
-func formatTime(t time.Time) string {
+func formatTime(t time.Time, lang string) string {
 	if t.IsZero() {
-		return "Chưa từng thấy"
+		return msgOf(lang).neverSeen
 	}
 	loc := time.FixedZone("UTC+7", 7*60*60)
 	return t.In(loc).Format("15:04:05 02/01/2006")
@@ -83,7 +84,7 @@ func formatMAC(mac string) string {
 	return strings.Join(parts, ":")
 }
 
-func formatNetworkType(netType string) string {
+func formatNetworkType(netType, lang string) string {
 	switch netType {
 	case "MESH_CONTROLLER":
 		return "Controller"
@@ -97,7 +98,7 @@ func formatNetworkType(netType string) string {
 		return "Agent (2.4GHz)"
 	default:
 		if netType == "" {
-			return "Không xác định"
+			return msgOf(lang).netUnknown
 		}
 		return netType
 	}
@@ -202,6 +203,17 @@ func main() {
 		}
 	}
 
+	// Language of Telegram messages; server logs stay Vietnamese regardless.
+	lang := strings.ToLower(strings.TrimSpace(os.Getenv("BOT_LANG")))
+	switch lang {
+	case "":
+		lang = langVI
+	case langVI, langEN:
+	default:
+		log.Printf("⚠️ BOT_LANG=%q không hỗ trợ (vi|en), dùng tiếng Việt", lang)
+		lang = langVI
+	}
+
 	fileBytes, err := os.ReadFile("devices.json")
 	if err != nil {
 		log.Fatalf("❌ Không đọc được devices.json: %v", err)
@@ -245,6 +257,7 @@ func main() {
 		bot:            bot,
 		keenClient:     client,
 		interval:       interval,
+		lang:           lang,
 		failThreshold:  failThreshold,
 	}
 
@@ -265,7 +278,7 @@ func main() {
 	go tracker.monitorLoop()
 	go tracker.handleTelegramCommands()
 
-	bootMsg := fmt.Sprintf("✅ *Keenetic Tracker Bot đã khởi chạy thành công!*\n\n📊 *Giám sát:* %d thiết bị\n⏱ *Chu kỳ quét:* %s\n🧭 Lệnh: /status · /clients · /refresh", len(tracker.monitoredOrder), intervalStr)
+	bootMsg := fmt.Sprintf(tracker.msg().boot, len(tracker.monitoredOrder), intervalStr)
 	msg := tgbotapi.NewMessage(tgChatID, bootMsg)
 	msg.ParseMode = "Markdown"
 	if _, err := bot.Send(msg); err != nil {
@@ -276,7 +289,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	shutdownMsg := "👋 *Keenetic Tracker Bot đang tạm dừng hoạt động.*"
+	shutdownMsg := tracker.msg().shutdown
 	msgShutdown := tgbotapi.NewMessage(tgChatID, shutdownMsg)
 	msgShutdown.ParseMode = "Markdown"
 	if _, err := bot.Send(msgShutdown); err != nil {
@@ -308,7 +321,7 @@ func (t *Tracker) handleScanFailure() {
 	if !shouldAlert {
 		return
 	}
-	msg := tgbotapi.NewMessage(t.chatID, fmt.Sprintf("🔴 *Mất kết nối controller!*\n\nKhông gọi được API của `%s` trong %d chu kỳ quét liên tiếp.\n🕒 _%s_", t.keenClient.Host, t.failThreshold, formatTime(time.Now())))
+	msg := tgbotapi.NewMessage(t.chatID, fmt.Sprintf(t.msg().controllerDown, t.keenClient.Host, t.failThreshold, formatTime(time.Now(), t.lang)))
 	msg.ParseMode = "Markdown"
 	if _, err := t.bot.Send(msg); err != nil {
 		log.Printf("⚠️ Không gửi controller-down alert: %v", err)
@@ -325,7 +338,7 @@ func (t *Tracker) handleScanSuccess() {
 	if !recovered {
 		return
 	}
-	msg := tgbotapi.NewMessage(t.chatID, fmt.Sprintf("🟢 *Controller đã phản hồi lại!*\n\nAPI `%s` hoạt động bình thường trở lại.\n🕒 _%s_", t.keenClient.Host, formatTime(time.Now())))
+	msg := tgbotapi.NewMessage(t.chatID, fmt.Sprintf(t.msg().controllerUp, t.keenClient.Host, formatTime(time.Now(), t.lang)))
 	msg.ParseMode = "Markdown"
 	if _, err := t.bot.Send(msg); err != nil {
 		log.Printf("⚠️ Không gửi controller-recovery alert: %v", err)
@@ -394,8 +407,8 @@ func (t *Tracker) checkNow(isInit bool) (keenclient.WiFIMesh, error) {
 		if isOnlineNow {
 			if !state.IsOnline {
 				state.IsOnline = true
-				notifyMsg := fmt.Sprintf("🟢 *Thiết bị trực tuyến trở lại!*\n\n📶 *%s*\n• MAC: `%s`\n• IP: `%s`\n• Kết nối: `%s`\n• Nút Mesh: `%s`\n• 📱 Client kết nối: *%d*\n🕒 Cập nhật: _%s_",
-					state.Name, formatMAC(state.MAC), state.LastIP, formatNetworkType(state.NetworkType), state.MeshNode, state.ConnectedCount, formatTime(time.Now()))
+				notifyMsg := fmt.Sprintf(t.msg().onlineNotify,
+					state.Name, formatMAC(state.MAC), state.LastIP, formatNetworkType(state.NetworkType, t.lang), state.MeshNode, state.ConnectedCount, formatTime(time.Now(), t.lang))
 				msg := tgbotapi.NewMessage(t.chatID, notifyMsg)
 				msg.ParseMode = "Markdown"
 				if _, err := t.bot.Send(msg); err != nil {
@@ -406,8 +419,8 @@ func (t *Tracker) checkNow(isInit bool) (keenclient.WiFIMesh, error) {
 			if state.IsOnline {
 				state.IsOnline = false
 				state.ConnectedCount = 0
-				notifyMsg := fmt.Sprintf("🚨 *Cảnh báo thiết bị ngoại tuyến!*\n\n🔴 *%s*\n• MAC: `%s`\n• IP cuối: `%s`\n• Nút Mesh cuối: `%s`\n🕒 Lần cuối thấy: _%s_",
-					state.Name, formatMAC(state.MAC), state.LastIP, state.MeshNode, formatTime(state.LastSeen))
+				notifyMsg := fmt.Sprintf(t.msg().offlineNotify,
+					state.Name, formatMAC(state.MAC), state.LastIP, state.MeshNode, formatTime(state.LastSeen, t.lang))
 				msg := tgbotapi.NewMessage(t.chatID, notifyMsg)
 				msg.ParseMode = "Markdown"
 				if _, err := t.bot.Send(msg); err != nil {
@@ -471,10 +484,10 @@ func (t *Tracker) sendHTML(chatID int64, html string) {
 func (t *Tracker) sendStatusMessage(chatID int64) {
 	mesh, err := t.keenClient.GetWiFIMesh()
 	if err != nil {
-		t.sendText(chatID, "❌ Không quét được mesh: "+err.Error())
+		t.sendText(chatID, fmt.Sprintf(t.msg().scanFail, err))
 		return
 	}
-	t.sendHTML(chatID, renderMeshMap(mesh))
+	t.sendHTML(chatID, renderMeshMap(mesh, t.lang))
 }
 
 // htmlEscape makes dynamic text safe for Telegram HTML parse mode.
@@ -488,7 +501,8 @@ func htmlEscape(s string) string {
 // mid-line on narrow phone screens. Formatted with Telegram HTML (not a code
 // block); dynamic names are escaped and names containing * or _ survive HTML
 // mode untouched.
-func renderMeshMap(mesh keenclient.WiFIMesh) string {
+func renderMeshMap(mesh keenclient.WiFIMesh, lang string) string {
+	m := msgOf(lang)
 	var sb strings.Builder
 	sb.WriteString("<b>🗺 Keenetic Mesh Monitor</b>\n")
 	for i, node := range mesh.Nodes {
@@ -528,7 +542,7 @@ func renderMeshMap(mesh keenclient.WiFIMesh) string {
 		}
 	}
 	if len(mesh.Candidates) > 0 {
-		sb.WriteString("\n➕ <b>Chờ ghép mesh:</b>\n")
+		sb.WriteString("\n" + m.meshCandidates + "\n")
 		for _, c := range mesh.Candidates {
 			name := c.Model
 			if name == "" {
@@ -551,7 +565,7 @@ func renderMeshMap(mesh keenclient.WiFIMesh) string {
 		}
 	}
 	sb.WriteString(fmt.Sprintf("\n📊 Controller 1 · Extenders %d · Wireless %d · Wired %d\n", len(mesh.Nodes)-1, wirelessTotal, wiredTotal))
-	sb.WriteString(fmt.Sprintf("🕒 <i>Cập nhật lúc: %s</i>", formatTime(time.Now())))
+	sb.WriteString(fmt.Sprintf(m.meshUpdated, formatTime(time.Now(), lang)))
 	return sb.String()
 }
 
@@ -560,12 +574,12 @@ func renderMeshMap(mesh keenclient.WiFIMesh) string {
 // plus the total counter that matches the Nodes table.
 func (t *Tracker) handleClientsCommand(chatID int64, arg string) {
 	if arg == "" {
-		t.sendText(chatID, "ℹ️ Dùng: /clients <tên node>\nVí dụ: /clients Agent-2 hoặc /clients controller")
+		t.sendText(chatID, t.msg().clientsUsage)
 		return
 	}
 	mesh, err := t.keenClient.GetWiFIMesh()
 	if err != nil {
-		t.sendText(chatID, "❌ Không quét được mesh: "+err.Error())
+		t.sendText(chatID, fmt.Sprintf(t.msg().scanFail, err))
 		return
 	}
 	var node *keenclient.MeshNode
@@ -582,7 +596,7 @@ func (t *Tracker) handleClientsCommand(chatID int64, arg string) {
 		for _, n := range mesh.Nodes {
 			names = append(names, n.Name)
 		}
-		t.sendText(chatID, "❓ Không tìm thấy node \""+arg+"\".\nCác node hiện có: "+strings.Join(names, ", "))
+		t.sendText(chatID, fmt.Sprintf(t.msg().nodeNotFound, arg, strings.Join(names, ", ")))
 		return
 	}
 
@@ -605,15 +619,15 @@ func (t *Tracker) handleClientsCommand(chatID int64, arg string) {
 
 	wirelessCount := keenclient.CountWirelessClients(clients)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📱 <b>%s</b> — tổng 👥 %d clients (%d wireless · %d wired)\n(×%d đang kết nối thực sự)\n\n",
+	sb.WriteString(fmt.Sprintf(t.msg().clientsHeader,
 		htmlEscape(node.Name), len(clients), wirelessCount, len(clients)-wirelessCount, len(shown)))
 	const maxShow = 30
 	if len(shown) == 0 {
-		sb.WriteString("Không có client nào đang kết nối thực sự.\n")
+		sb.WriteString(t.msg().noClients)
 	}
 	for i, c := range shown {
 		if i == maxShow {
-			sb.WriteString(fmt.Sprintf("… và %d client nữa\n", len(shown)-maxShow))
+			sb.WriteString(fmt.Sprintf(t.msg().moreClients, len(shown)-maxShow))
 			break
 		}
 		if c.IsWireless {
@@ -636,7 +650,7 @@ func (t *Tracker) handleClientsCommand(chatID int64, arg string) {
 }
 
 func (t *Tracker) handleRefreshCommand(chatID int64) {
-	waitMsg := tgbotapi.NewMessage(chatID, "🔄 *Đang thực hiện quét hệ thống ngay lập tức...*")
+	waitMsg := tgbotapi.NewMessage(chatID, t.msg().refreshWait)
 	waitMsg.ParseMode = "Markdown"
 	sentMsg, err := t.bot.Send(waitMsg)
 	if err == nil {
@@ -650,8 +664,8 @@ func (t *Tracker) handleRefreshCommand(chatID int64) {
 
 	mesh, err := t.checkNow(false)
 	if err != nil {
-		t.sendText(chatID, "❌ Quét hệ thống thất bại: "+err.Error())
+		t.sendText(chatID, fmt.Sprintf(t.msg().refreshFail, err))
 		return
 	}
-	t.sendHTML(chatID, renderMeshMap(mesh))
+	t.sendHTML(chatID, renderMeshMap(mesh, t.lang))
 }

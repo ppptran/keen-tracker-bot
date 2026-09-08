@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ func TestRenderMeshMap(t *testing.T) {
 			{IsController: false, Name: "Keenetic Xiaomi 3G 262***022", IsOnline: false},
 		},
 	}
-	got := renderMeshMap(mesh)
+	got := renderMeshMap(mesh, langVI)
 
 	wantBlocks := []string{
 		"🎛 <b>Controller-P#33</b> · KN-3811 · OS 5.0.12\n│      👥 3 · 🟢 Online ·  5d 00:00\n",
@@ -39,5 +40,22 @@ func TestRenderMeshMap(t *testing.T) {
 	// standalone "│" line between entries.
 	if strings.Contains(got, "│  \n") {
 		t.Errorf("unexpected standalone connector line\nGot:\n%s", got)
+	}
+}
+
+// TestMessageCatalogsInSync guards the bilingual catalogs: every template must
+// exist in both languages with the same number of format verbs, otherwise
+// Sprintf produces garbled output for one language.
+func TestMessageCatalogsInSync(t *testing.T) {
+	viV := reflect.ValueOf(*catalogs[langVI])
+	enV := reflect.ValueOf(*catalogs[langEN])
+	typ := viV.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		name := typ.Field(i).Name
+		viVerbs := strings.Count(viV.Field(i).String(), "%")
+		enVerbs := strings.Count(enV.Field(i).String(), "%")
+		if viVerbs != enVerbs {
+			t.Errorf("messages.%s: vi has %d format verb(s), en has %d", name, viVerbs, enVerbs)
+		}
 	}
 }
