@@ -172,6 +172,11 @@ vi .env        # hoặc: opkg install nano && nano .env
 TELEGRAM_TOKEN=123456:ABC...      # token từ @BotFather
 TELEGRAM_CHAT_ID=........       # chat ID nhận cảnh báo
 
+# Proxy CHỈ cho traffic Telegram API — call tới router trong LAN không bao giờ đi qua proxy.
+# Uncomment khi Telegram không kết nối được từ mạng của bạn, rồi restart bot.
+# Hỗ trợ socks5:// và http://; comment lại dòng này để quay về chế độ đi trực tiếp.
+#HTTPS_PROXY=socks5://user:pass@proxy-ip:1080
+
 # Ngôn ngữ bot: vi (tiếng Việt) hoặc en (tiếng Anh); mặc định vi
 BOT_LANG=vi
 
@@ -188,6 +193,8 @@ CONTROLLER_FAIL_THRESHOLD=3
 ```
 
 > Bot chạy trên chính router nên `KEENETIC_IP` có thể thử `127.0.0.1`; nếu không được thì dùng IP LAN (`192.168.1.1`).
+
+> **Telegram không kết nối được / bot im lặng?** Nhà mạng có thể đang can thiệp tới Telegram API (xuất hiện ở Việt Nam từ 2025). Uncomment `HTTPS_PROXY` và trỏ tới một proxy đến được Telegram (một VPS nhỏ ở nước ngoài là đủ), rồi restart bot (`systemctl restart keen-tracker-bot` trên LXC, hoặc script init trên router). Chỉ traffic Telegram đi qua proxy; call tới router trong LAN vẫn đi trực tiếp. Muốn quay lại chế độ trực tiếp: comment dòng đó và restart.
 
 ---
 
@@ -284,6 +291,51 @@ Thấy dòng boot (không có `❌`) và nhận được tin **"Keenetic Tracker
 
 ---
 
+## 8. Cách khác: chạy trên Linux server / Proxmox LXC (systemd)
+
+Bot cũng chạy trên bất kỳ máy Linux x86-64 nào (ví dụ container Proxmox LXC) bằng binary `-amd64` và service systemd. Copy đúng 3 file như bước 3 (binary, `.env`, `devices.json`) vào ví dụ `/opt/keenetic-bot`, rồi tạo file `/etc/systemd/system/keen-tracker-bot.service`:
+
+```sh
+cat > /etc/systemd/system/keen-tracker-bot.service << 'EOF'
+[Unit]
+Description=Keen Tracker Bot (Keenetic mesh monitor)
+After=network-online.target
+Wants=network-online.target
+# không bao giờ khóa unit sau nhiều lần restart liên tiếp (mất mạng dài)
+StartLimitIntervalSec=0
+
+[Service]
+WorkingDirectory=/opt/keenetic-bot
+ExecStart=/opt/keenetic-bot/keen-tracker-bot-linux-amd64
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now keen-tracker-bot
+```
+
+Ý nghĩa các dòng restart — nảy sinh từ thực tế bot gọi Telegram API, thứ thỉnh thoảng mất kết nối ở một số nhà mạng:
+
+- `Restart=always` + `RestartSec=10` — process chết vì lý do gì (crash, panic, OOM…) thì systemd tự chạy lại sau 10 giây. Lệnh `systemctl stop` thủ công vẫn được tôn trọng.
+- `StartLimitIntervalSec=0` — tắt cơ chế mặc định của systemd ("start request repeated too quickly") khóa unit sau ~5 lần fail nhanh liên tiếp. Không tắt thì đúng lúc mất mạng dài — lúc cần bot cố gắng nhất — unit lại bị kẹt ở trạng thái `failed`.
+- `WorkingDirectory` phải trỏ đúng thư mục chứa 3 file — bot đọc `.env` và `devices.json` theo thư mục hiện tại.
+
+> Lưu ý: `Restart=` chỉ có tác dụng khi process **thoát hẳn**. Binary hiện tại đã đặt timeout 90 giây cho mọi request tới Telegram API nên kết nối bị treo sẽ tự đứt và polling tự chạy lại — không còn trạng thái "process sống mà im lặng" như trước; cấu hình systemd trên là lưới an toàn cho các lỗi còn lại. Nếu Telegram bị **chặn hẳn** chứ không chỉ chập chờn, hãy cho bot đi qua proxy bằng `HTTPS_PROXY` — xem bước 4.
+
+Điều khiển và xem log:
+
+```sh
+systemctl status keen-tracker-bot
+journalctl -u keen-tracker-bot -f        # log trực tiếp
+systemctl restart keen-tracker-bot       # sau khi thay binary mới
+```
+
+---
+
 ## Cập nhật bot về sau
 
 ```sh
@@ -291,6 +343,8 @@ Thấy dòng boot (không có `❌`) và nhận được tin **"Keenetic Tracker
 # thay file binary mới vào /opt/keenetic-bot/ (wget/scp như bước 3)
 /opt/etc/init.d/S99keenetic-bot start
 ```
+
+*(Với bản cài trên LXC/systemd, tương đương là `systemctl restart keen-tracker-bot` sau khi thay binary.)*
 
 ## Build từ nguồn (máy tính cần cài Go)
 

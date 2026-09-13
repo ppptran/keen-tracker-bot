@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sort"
@@ -242,7 +244,23 @@ func main() {
 		}
 	}
 
-	bot, err := tgbotapi.NewBotAPI(tgToken)
+	// The library's default http.Client has no timeout, so a blackholed
+	// Telegram connection (typical ISP interference) hangs getUpdates forever
+	// and the bot goes silent. Every request must be bounded, but the total
+	// timeout has to stay above the 60s long-poll window set in
+	// handleTelegramCommands. ProxyFromEnvironment also gives a Telegram-only
+	// escape hatch: HTTPS_PROXY/NO_PROXY apply to this client alone.
+	tgHTTP := &http.Client{
+		Timeout: 90 * time.Second,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ResponseHeaderTimeout: 75 * time.Second,
+			ForceAttemptHTTP2:     true,
+		},
+	}
+	bot, err := tgbotapi.NewBotAPIWithClient(tgToken, tgbotapi.APIEndpoint, tgHTTP)
 	if err != nil {
 		log.Fatalf("❌ Không kết nối được Telegram bot: %v", err)
 	}

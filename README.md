@@ -172,6 +172,11 @@ vi .env        # or: opkg install nano && nano .env
 TELEGRAM_TOKEN=123456:ABC...      # token from @BotFather
 TELEGRAM_CHAT_ID=........       # chat ID that receives alerts
 
+# Proxy for Telegram API traffic ONLY — Keenetic LAN calls are never proxied.
+# Uncomment when Telegram is unreachable from your network, then restart the bot.
+# Supports socks5:// and http:// URLs; comment it out again to go direct.
+#HTTPS_PROXY=socks5://user:pass@proxy-ip:1080
+
 # Bot language: vi (Vietnamese) or en (English); default vi
 BOT_LANG=vi
 
@@ -188,6 +193,8 @@ CONTROLLER_FAIL_THRESHOLD=3
 ```
 
 > Since the bot runs on the router itself, you can try `127.0.0.1` for `KEENETIC_IP`; if that doesn't work, use the LAN IP (`192.168.1.1`).
+
+> **Telegram unreachable / bot goes silent?** Your ISP may be interfering with the Telegram API (seen in Vietnam since 2025). Uncomment `HTTPS_PROXY` and point it at a proxy that can reach Telegram (a small VPS abroad is enough), then restart the bot (`systemctl restart keen-tracker-bot` on an LXC, or the init script on the router). Only Telegram traffic goes through the proxy; router/LAN calls stay direct. To go direct again, comment the line out and restart.
 
 ---
 
@@ -284,6 +291,51 @@ Once you see the boot lines (no `❌`) and receive the **"Keenetic Tracker Bot s
 
 ---
 
+## 8. Alternative: run on a Linux server / Proxmox LXC (systemd)
+
+The bot also runs on any x86-64 Linux machine (e.g. a Proxmox LXC container) with the `-amd64` binary and a systemd service. Copy the same 3 files as in step 3 (binary, `.env`, `devices.json`) into e.g. `/opt/keenetic-bot`, then create `/etc/systemd/system/keen-tracker-bot.service`:
+
+```sh
+cat > /etc/systemd/system/keen-tracker-bot.service << 'EOF'
+[Unit]
+Description=Keen Tracker Bot (Keenetic mesh monitor)
+After=network-online.target
+Wants=network-online.target
+# never lock the unit out after repeated restarts (e.g. a long network outage)
+StartLimitIntervalSec=0
+
+[Service]
+WorkingDirectory=/opt/keenetic-bot
+ExecStart=/opt/keenetic-bot/keen-tracker-bot-linux-amd64
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now keen-tracker-bot
+```
+
+Why these restart settings exist — the bot calls the Telegram API, which is intermittently unreachable from some networks/ISPs:
+
+- `Restart=always` + `RestartSec=10` — whatever ends the process (crash, panic, OOM…), systemd brings it back 10 seconds later. A deliberate `systemctl stop` is still respected.
+- `StartLimitIntervalSec=0` — disables systemd's default lockout ("start request repeated too quickly") after ~5 fast consecutive failures. Without it, the unit gets stuck in `failed` state exactly during a long outage — when the bot needs to keep trying the most.
+- `WorkingDirectory` must point at the folder holding the 3 files — the bot reads `.env` and `devices.json` from its current directory.
+
+> Note: `Restart=` only fires when the process **exits**. Since the Telegram HTTP client now uses a bounded 90-second request timeout, a hung connection terminates by itself and polling resumes automatically, so the old silent-but-alive hang no longer occurs; the unit above is the safety net for everything else. If Telegram is **blocked outright** on your network rather than just flaky, route the bot through a proxy with `HTTPS_PROXY` — see step 4.
+
+Control and logs:
+
+```sh
+systemctl status keen-tracker-bot
+journalctl -u keen-tracker-bot -f        # live logs
+systemctl restart keen-tracker-bot       # after replacing the binary
+```
+
+---
+
 ## Updating the bot later
 
 ```sh
@@ -291,6 +343,8 @@ Once you see the boot lines (no `❌`) and receive the **"Keenetic Tracker Bot s
 # drop the new binary into /opt/keenetic-bot/ (wget/scp as in step 3)
 /opt/etc/init.d/S99keenetic-bot start
 ```
+
+*(On an LXC/systemd install, the equivalent is `systemctl restart keen-tracker-bot` after replacing the binary.)*
 
 ## Build from source (requires Go on your computer)
 
